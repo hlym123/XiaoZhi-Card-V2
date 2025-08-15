@@ -16,7 +16,7 @@ git submodule update --init --recursive
 -----------------------------------
 ## 编译、烧录
 
-* esp-idf veriosn: ESP-IDF v5.4-dirty
+* esp-idf veriosn: ESP-IDF v6.0-dev-1489-g4e036983a7
  
 1. 配置编译目标  
 
