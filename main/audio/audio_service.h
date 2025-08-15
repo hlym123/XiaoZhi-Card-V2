@@ -107,6 +107,8 @@ public:
     bool ReadAudioData(std::vector<int16_t>& data, int sample_rate, int samples);
     void ResetDecoder();
 
+    // Add for XiaoZhi-Card
+    void Pause(bool enable) { pause_ = enable; };
 private:
     AudioCodec* codec_ = nullptr;
     AudioServiceCallbacks callbacks_;
@@ -152,6 +154,9 @@ private:
     void PushTaskToEncodeQueue(AudioTaskType type, std::vector<int16_t>&& pcm);
     void SetDecodeSampleRate(int sample_rate, int frame_duration);
     void CheckAndUpdateAudioPowerState();
+
+    // Add for XiaoZhi-Card
+    bool pause_ = false;
 };
 
 #endif

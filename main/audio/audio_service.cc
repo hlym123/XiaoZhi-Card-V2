@@ -272,7 +272,7 @@ void AudioService::AudioInputTask() {
 
     ESP_LOGW(TAG, "Audio input task stopped");
 }
-
+ 
 void AudioService::AudioOutputTask() {
     while (true) {
         std::unique_lock<std::mutex> lock(audio_queue_mutex_);
@@ -287,9 +287,12 @@ void AudioService::AudioOutputTask() {
         lock.unlock();
 
         if (!codec_->output_enabled()) {
-            codec_->EnableOutput(true);
+            // Add for XiaoZhi-Card Board
+            if (!pause_) {
+                codec_->EnableOutput(true);
+            }
             esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
-        }
+        } 
         codec_->OutputData(task->pcm);
 
         /* Update the last output time */

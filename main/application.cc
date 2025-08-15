@@ -15,6 +15,11 @@
 #include <driver/gpio.h>
 #include <arpa/inet.h>
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+#include "esp_lvgl_port.h"
+
+
 #define TAG "Application"
 
 
@@ -32,6 +37,10 @@ static const char* const STATE_STRINGS[] = {
     "fatal_error",
     "invalid_state"
 };
+
+extern QueueHandle_t upgrade_queue;
+
+
 
 Application::Application() {
     event_group_ = xEventGroupCreate();
@@ -52,7 +61,7 @@ Application::Application() {
             app->OnClockTimer();
         },
         .arg = this,
-        .dispatch_method = ESP_TIMER_TASK,
+        .dispatch_method = ESP_TIMER_TASK, // 任务
         .name = "clock_timer",
         .skip_unhandled_events = true
     };
@@ -103,41 +112,62 @@ void Application::CheckNewVersion(Ota& ota) {
         retry_delay = 10; // 重置重试延迟时间
 
         if (ota.HasNewVersion()) {
-            Alert(Lang::Strings::OTA_UPGRADE, Lang::Strings::UPGRADING, "happy", Lang::Sounds::P3_UPGRADE);
+            // Alert(Lang::Strings::OTA_UPGRADE, Lang::Strings::UPGRADING, "happy", Lang::Sounds::P3_UPGRADE);
+            // vTaskDelay(pdMS_TO_TICKS(3000));
 
-            vTaskDelay(pdMS_TO_TICKS(3000));
-
-            SetDeviceState(kDeviceStateUpgrading);
-            
-            display->SetIcon(FONT_AWESOME_DOWNLOAD);
-            std::string message = std::string(Lang::Strings::NEW_VERSION) + ota.GetFirmwareVersion();
-            display->SetChatMessage("system", message.c_str());
-
-            board.SetPowerSaveMode(false);
-            audio_service_.Stop();
-            vTaskDelay(pdMS_TO_TICKS(1000));
-
-            bool upgrade_success = ota.StartUpgrade([display](int progress, size_t speed) {
-                char buffer[64];
-                snprintf(buffer, sizeof(buffer), "%d%% %uKB/s", progress, speed / 1024);
-                display->SetChatMessage("system", buffer);
-            });
-
-            if (!upgrade_success) {
-                // Upgrade failed, restart audio service and continue running
-                ESP_LOGE(TAG, "Firmware upgrade failed, restarting audio service and continuing operation...");
-                audio_service_.Start(); // Restart audio service
-                board.SetPowerSaveMode(true); // Restore power save mode
-                Alert(Lang::Strings::ERROR, Lang::Strings::UPGRADE_FAILED, "sad", Lang::Sounds::P3_EXCLAMATION);
-                vTaskDelay(pdMS_TO_TICKS(3000));
-                // Continue to normal operation (don't break, just fall through)
+            upgrade_queue = xQueueCreate(5, sizeof(int));
+            lvgl_port_lock(0);
+            lv_obj_add_flag(display->content_, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_remove_flag(display->main_btn_confirm_upgrade_, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_remove_flag(display->main_btn_skip_upgrade_, LV_OBJ_FLAG_HIDDEN);
+            lvgl_port_unlock();
+            int upgrade = 0;
+            if (!xQueueReceive(upgrade_queue, &upgrade, pdMS_TO_TICKS(30*1000))) { // 阻塞等待用户选择(30秒超时)
+                ESP_LOGW(TAG, "User did not respond to upgrade prompt.");
+                upgrade = 0;  
             } else {
-                // Upgrade success, reboot immediately
-                ESP_LOGI(TAG, "Firmware upgrade successful, rebooting...");
-                display->SetChatMessage("system", "Upgrade successful, rebooting...");
-                vTaskDelay(pdMS_TO_TICKS(1000)); // Brief pause to show message
-                Reboot();
-                return; // This line will never be reached after reboot
+                ESP_LOGI(TAG, "Ready to upgrade prompt.");
+            }
+            vQueueDelete(upgrade_queue);
+            lvgl_port_lock(0);
+            lv_obj_delete(display->main_btn_confirm_upgrade_);
+            lv_obj_delete(display->main_btn_skip_upgrade_);
+            lv_obj_remove_flag(display->content_, LV_OBJ_FLAG_HIDDEN);
+            lvgl_port_unlock();
+
+            if (upgrade == 1) {  
+                SetDeviceState(kDeviceStateUpgrading);
+                
+                display->SetIcon(FONT_AWESOME_DOWNLOAD);
+                std::string message = std::string(Lang::Strings::NEW_VERSION) + ota.GetFirmwareVersion();
+                display->SetChatMessage("system", message.c_str());
+
+                board.SetPowerSaveMode(false);
+                audio_service_.Stop();
+                vTaskDelay(pdMS_TO_TICKS(1000));
+
+                bool upgrade_success = ota.StartUpgrade([display](int progress, size_t speed) {
+                    char buffer[64];
+                    snprintf(buffer, sizeof(buffer), "%d%% %uKB/s", progress, speed / 1024);
+                    display->SetChatMessage("system", buffer);
+                });
+
+                if (!upgrade_success) {
+                    // Upgrade failed, restart audio service and continue running
+                    ESP_LOGE(TAG, "Firmware upgrade failed, restarting audio service and continuing operation...");
+                    audio_service_.Start(); // Restart audio service
+                    board.SetPowerSaveMode(true); // Restore power save mode
+                    Alert(Lang::Strings::ERROR, Lang::Strings::UPGRADE_FAILED, "sad", Lang::Sounds::P3_EXCLAMATION);
+                    vTaskDelay(pdMS_TO_TICKS(3000));
+                    // Continue to normal operation (don't break, just fall through)
+                } else {
+                    // Upgrade success, reboot immediately
+                    ESP_LOGI(TAG, "Firmware upgrade successful, rebooting...");
+                    display->SetChatMessage("system", "Upgrade successful, rebooting...");
+                    vTaskDelay(pdMS_TO_TICKS(1000)); // Brief pause to show message
+                    Reboot();
+                    return; // This line will never be reached after reboot
+                }
             }
         }
 
@@ -251,7 +281,6 @@ void Application::ToggleChatState() {
                     return;
                 }
             }
-
             SetListeningMode(aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime);
         });
     } else if (device_state_ == kDeviceStateSpeaking) {
@@ -330,11 +359,18 @@ void Application::Start() {
 
     /* Setup the display */
     auto display = board.GetDisplay();
+    display->FullRefresh();
 
     /* Setup the audio service */
     auto codec = board.GetAudioCodec();
     audio_service_.Initialize(codec);
     audio_service_.Start();
+    // 播放开机提示音
+    audio_service_.PlaySound(Lang::Sounds::P3_STARTUP);
+    // 等待主页面加载 
+    while (lv_screen_active() != display->scr_main_) {
+        vTaskDelay(pdMS_TO_TICKS(50)); 
+    }
 
     AudioServiceCallbacks callbacks;
     callbacks.on_send_queue_available = [this]() {
@@ -499,8 +535,12 @@ void Application::Start() {
         display->ShowNotification(message.c_str());
         display->SetChatMessage("system", "");
         // Play the success sound to indicate the device is ready
-        audio_service_.PlaySound(Lang::Sounds::P3_SUCCESS);
+        audio_service_.PlaySound(Lang::Sounds::P3_WELCOME);;
     }
+
+    lvgl_port_lock(0);
+    lv_obj_remove_flag(display->main_btn_chat_, LV_OBJ_FLAG_HIDDEN);
+    lvgl_port_unlock();
 
     // Print heap stats
     SystemInfo::PrintHeapStats();
@@ -519,6 +559,7 @@ void Application::OnClockTimer() {
     if (clock_ticks_ % 10 == 0) {
         // SystemInfo::PrintTaskCpuUsage(pdMS_TO_TICKS(1000));
         // SystemInfo::PrintTaskList();
+        // Add for XiaoZhi-Card 
         SystemInfo::PrintHeapStats();
     }
 }
@@ -620,7 +661,8 @@ void Application::OnWakeWordDetected() {
 
 void Application::AbortSpeaking(AbortReason reason) {
     ESP_LOGI(TAG, "Abort speaking");
-    aborted_ = true;
+    // Add for XiaoZhi-Card Board
+    // aborted_ = true;
     protocol_->SendAbortSpeaking(reason);
 }
 
@@ -630,6 +672,10 @@ void Application::SetListeningMode(ListeningMode mode) {
 }
 
 void Application::SetDeviceState(DeviceState state) {
+    static int cnt = 0;
+    static int64_t listen_start_time = 0; // 单次监听开始时间
+    static int64_t total_listen_time = 0; // 累计 Listening 时长（单位：us）
+
     if (device_state_ == state) {
         return;
     }
@@ -643,16 +689,41 @@ void Application::SetDeviceState(DeviceState state) {
     DeviceStateEventManager::GetInstance().PostStateChangeEvent(previous_state, state);
 
     auto& board = Board::GetInstance();
+    auto codec = board.GetAudioCodec();
     auto display = board.GetDisplay();
     auto led = board.GetLed();
     led->OnStateChanged();
+    display->SetContentVisible(true);
+    display->SetBtnNewChatVisible(false);
+    PausePlay(false);
     switch (state) {
         case kDeviceStateUnknown:
         case kDeviceStateIdle:
             display->SetStatus(Lang::Strings::STANDBY);
             display->SetEmotion("neutral");
+            display->SetBtnChatMessage("对话");
+            board.SetIndicator(0, 0, 50);
             audio_service_.EnableVoiceProcessing(false);
             audio_service_.EnableWakeWordDetection(true);
+
+            // 如果上一个状态是 Listening，更新累计时长
+            if (previous_state == kDeviceStateListening && listen_start_time != 0) {
+                int64_t duration = esp_timer_get_time() - listen_start_time;
+                total_listen_time += duration;
+                listen_start_time = 0;
+            }
+            // 超过 30 秒就全刷
+            if (cnt != 0 && total_listen_time > 30 * 1000000) {
+                // Fixe Me: Ringbuffer of AFE(FEED) is full 
+                lvgl_port_lock(0);
+                board.ClearDisplay(0x00);
+                lv_obj_invalidate(lv_screen_active());   
+                lv_refr_now(NULL);
+                lvgl_port_unlock();
+                total_listen_time = 0;  // 重置累计时间
+            }
+            cnt = 1;
+
             break;
         case kDeviceStateConnecting:
             display->SetStatus(Lang::Strings::CONNECTING);
@@ -662,6 +733,12 @@ void Application::SetDeviceState(DeviceState state) {
         case kDeviceStateListening:
             display->SetStatus(Lang::Strings::LISTENING);
             display->SetEmotion("neutral");
+            display->SetBtnChatMessage("退出");
+            board.SetIndicator(0, 50, 0);
+            // 仅首次进入 Listening 时记录开始时间
+            if (previous_state != kDeviceStateListening && listen_start_time == 0) {
+                listen_start_time = esp_timer_get_time();
+            }
 
             // Make sure the audio processor is running
             if (!audio_service_.IsAudioProcessorRunning()) {
@@ -673,6 +750,8 @@ void Application::SetDeviceState(DeviceState state) {
             break;
         case kDeviceStateSpeaking:
             display->SetStatus(Lang::Strings::SPEAKING);
+            display->SetBtnChatMessage("暂停");
+            codec->EnableOutput(true);   
 
             if (listening_mode_ != kListeningModeRealtime) {
                 audio_service_.EnableVoiceProcessing(false);
@@ -718,7 +797,7 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
 }
 
 bool Application::CanEnterSleepMode() {
-    if (device_state_ != kDeviceStateIdle) {
+    if (device_state_ != kDeviceStateIdle && device_state_ != kDeviceStateStarting) {
         return false;
     }
 
@@ -772,3 +851,5 @@ void Application::SetAecMode(AecMode mode) {
 void Application::PlaySound(const std::string_view& sound) {
     audio_service_.PlaySound(sound);
 }
+
+ 

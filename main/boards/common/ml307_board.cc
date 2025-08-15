@@ -192,3 +192,13 @@ std::string Ml307Board::GetDeviceStatusJson() {
     cJSON_Delete(root);
     return json;
 }
+
+bool Ml307Board::PowerOff() {
+    auto uart = modem_->GetAtUart();
+    if (uart->SendCommand("AT+MPOF=0", 1000)) {
+        std::string response = uart->GetResponse();
+        return (response == "POWER OFF");
+    }
+                
+    return false;
+}

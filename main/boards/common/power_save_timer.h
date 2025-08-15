@@ -15,7 +15,10 @@ public:
     void OnExitSleepMode(std::function<void()> callback);
     void OnShutdownRequest(std::function<void()> callback);
     void WakeUp();
-
+    // 
+    bool GetState() { return enabled_; }
+    void ManualSleep();
+    void ResetTick();
 private:
     void PowerSaveCheck();
 

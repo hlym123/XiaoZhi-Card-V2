@@ -160,3 +160,27 @@ std::string Board::GetJson() {
     json += R"(})";
     return json;
 }
+
+
+
+bool Board::PowerOff()
+{
+    return false;
+}
+
+bool Board::GetPowerSaveMode()
+{
+    return false;
+}
+
+void Board::ClearDisplay(uint8_t color)
+{
+ 
+}
+
+void Board::SetIndicator(uint8_t r, uint8_t g, uint8_t b)
+{
+ 
+}
+
+  

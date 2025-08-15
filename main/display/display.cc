@@ -140,11 +140,11 @@ void Display::UpdateStatusBar(bool update_all) {
         } else {
             const char* levels[] = {
                 FONT_AWESOME_BATTERY_EMPTY, // 0-19%
-                FONT_AWESOME_BATTERY_1,    // 20-39%
-                FONT_AWESOME_BATTERY_2,    // 40-59%
-                FONT_AWESOME_BATTERY_3,    // 60-79%
-                FONT_AWESOME_BATTERY_FULL, // 80-99%
-                FONT_AWESOME_BATTERY_FULL, // 100%
+                FONT_AWESOME_BATTERY_1,     // 20-39%
+                FONT_AWESOME_BATTERY_2,     // 40-59%
+                FONT_AWESOME_BATTERY_3,     // 60-79%
+                FONT_AWESOME_BATTERY_FULL,  // 80-99%
+                FONT_AWESOME_BATTERY_FULL,  // 100%
             };
             icon = levels[battery_level / 20];
         }
@@ -154,19 +154,21 @@ void Display::UpdateStatusBar(bool update_all) {
             lv_label_set_text(battery_label_, battery_icon_);
         }
 
-        if (low_battery_popup_ != nullptr) {
-            if (strcmp(icon, FONT_AWESOME_BATTERY_EMPTY) == 0 && discharging) {
-                if (lv_obj_has_flag(low_battery_popup_, LV_OBJ_FLAG_HIDDEN)) { // 如果低电量提示框隐藏，则显示
-                    lv_obj_clear_flag(low_battery_popup_, LV_OBJ_FLAG_HIDDEN);
-                    app.PlaySound(Lang::Sounds::P3_LOW_BATTERY);
-                }
-            } else {
-                // Hide the low battery popup when the battery is not empty
-                if (!lv_obj_has_flag(low_battery_popup_, LV_OBJ_FLAG_HIDDEN)) { // 如果低电量提示框显示，则隐藏
-                    lv_obj_add_flag(low_battery_popup_, LV_OBJ_FLAG_HIDDEN);
-                }
-            }
-        }
+        // if (low_battery_popup_ != nullptr) {
+        //     if (strcmp(icon, FONT_AWESOME_BATTERY_EMPTY) == 0 && discharging) {
+        //         if (lv_obj_has_flag(low_battery_popup_, LV_OBJ_FLAG_HIDDEN)) { // 如果低电量提示框隐藏，则显示 
+        //             lv_obj_remove_flag(low_battery_popup_, LV_OBJ_FLAG_HIDDEN);
+        //             app.PlaySound(Lang::Sounds::P3_LOW_BATTERY);
+        //         }
+        //         lv_obj_add_flag(main_btn_chat_, LV_OBJ_FLAG_HIDDEN);
+        //     } else {
+        //         // Hide the low battery popup when the battery is not empty
+        //         if (!lv_obj_has_flag(low_battery_popup_, LV_OBJ_FLAG_HIDDEN)) { // 如果低电量提示框显示，则隐藏
+        //             lv_obj_add_flag(low_battery_popup_, LV_OBJ_FLAG_HIDDEN);
+        //         }
+        //         lv_obj_remove_flag(main_btn_chat_, LV_OBJ_FLAG_HIDDEN);
+        //     }
+        // }
     }
 
     // 每 10 秒更新一次网络图标
@@ -276,5 +278,60 @@ void Display::SetPowerSaveMode(bool on) {
     } else {
         SetChatMessage("system", "");
         SetEmotion("neutral");
+    }
+}
+
+void Display::UpdateVolume(int volume) {
+    DisplayLockGuard lock(this);
+    if (label_volume_ == nullptr) {
+        return;
+    }
+    lv_label_set_text_fmt(label_volume_, "%d", volume);
+}
+
+
+
+// 对话按钮 label 设置 
+void Display::SetBtnChatMessage(const char* content) {
+    DisplayLockGuard lock(this);
+    if (main_btn_chat_label_ == nullptr) {
+        return;
+    }
+    lv_label_set_text(main_btn_chat_label_, content);
+}
+
+// 新对话按钮设置 
+void Display::SetBtnNewChatVisible(bool visible) {
+    DisplayLockGuard lock(this);  
+    if (main_btn_new_chat_ == nullptr) {
+        return;
+    }
+
+    if (visible) {
+        lv_obj_remove_flag(main_btn_new_chat_, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(main_btn_new_chat_, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+// 对话信息 
+void Display::SetContentVisible(bool visible) {
+    DisplayLockGuard lock(this);  
+    
+    if (visible) {
+        lv_obj_remove_flag(content_, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(content_, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+// 全刷 
+void Display::FullRefresh() {
+    DisplayLockGuard lock(this);  
+    auto& board = Board::GetInstance();
+    board.ClearDisplay(0x00);
+    for (int i = 0; i < 5; i++) {
+        lv_obj_invalidate(lv_screen_active());   
+        lv_refr_now(NULL);
     }
 }

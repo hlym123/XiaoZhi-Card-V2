@@ -48,8 +48,15 @@ public:
     virtual bool GetBatteryLevel(int &level, bool& charging, bool& discharging);
     virtual std::string GetJson();
     virtual void SetPowerSaveMode(bool enabled) = 0;
+
     virtual std::string GetBoardJson() = 0;
     virtual std::string GetDeviceStatusJson() = 0;
+
+    // Add for XiaoZhi-Card 
+    virtual bool PowerOff();
+    virtual void ClearDisplay(uint8_t color);
+    virtual void SetIndicator(uint8_t r, uint8_t g, uint8_t b);
+    virtual bool GetPowerSaveMode();
 };
 
 #define DECLARE_BOARD(BOARD_CLASS_NAME) \

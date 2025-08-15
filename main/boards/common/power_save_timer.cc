@@ -123,3 +123,15 @@ void PowerSaveTimer::WakeUp() {
         }
     }
 }
+
+void PowerSaveTimer::ManualSleep() {
+    ticks_ = 0;  // 复位定时器
+    if (!in_sleep_mode_ && on_enter_sleep_mode_) {
+        in_sleep_mode_ = true;
+        on_enter_sleep_mode_();
+    }
+}
+
+void PowerSaveTimer::ResetTick() {
+    ticks_ = 0;  // 复位计数值
+}

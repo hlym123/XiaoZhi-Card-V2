@@ -5,6 +5,9 @@
 #include <esp_log.h>
 #include <cstring>
 #include <driver/i2s_common.h>
+#include "lvgl.h"
+#include "display.h"
+
 
 #define TAG "AudioCodec"
 
@@ -51,6 +54,10 @@ void AudioCodec::SetOutputVolume(int volume) {
     output_volume_ = volume;
     ESP_LOGI(TAG, "Set output volume to %d", output_volume_);
     
+    Board& board = Board::GetInstance();
+    auto display = board.GetDisplay();
+    display->UpdateVolume(volume);
+
     Settings settings("audio", true);
     settings.SetInt("output_volume", output_volume_);
 }
