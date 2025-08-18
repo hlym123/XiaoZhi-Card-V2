@@ -101,10 +101,10 @@ private:
     void Sleep();                    // 休眠 esp32s3 lightsleep，es8311 sleep 
     void WakeUp();                   // 唤醒
 
+    void PowerOnModem();
+    void PowerOffModem();
     void Enable4G(void);
     void Disable4G(void);
-    // TODO
-    // 4G 
 
     virtual Display *GetDisplay() override;
 
@@ -554,23 +554,14 @@ void XiaozhiCardBoard::Shutdown()
         //         vTaskDelay(pdMS_TO_TICKS(100));
         //     }
         // }
-        gpio_num_t pwr_pin = ML307R_PIN_PWR;
-        gpio_reset_pin(pwr_pin);
-        gpio_set_direction(pwr_pin, GPIO_MODE_OUTPUT);
-        gpio_set_level(pwr_pin, 0);
-        vTaskDelay(pdMS_TO_TICKS(100));
-        // 开机状态下，PWR 拉低 3.5 ~ 4.0s 关机 （pwr 逻辑反转）
-        gpio_set_level(pwr_pin, 1); 
-        vTaskDelay(pdMS_TO_TICKS(3750));
-        gpio_set_level(pwr_pin, 0);
-
+        PowerOffModem();
     } else if (network_type == NetworkType::WIFI) { // 确认 4G 模组已关机 
         uint8_t i = 0; 
         while (i++ < 10) {
             if (modem_powered_on_) { 
                 break;
             }
-            vTaskDelay(pdMS_TO_TICKS(100));
+            vTaskDelay(pdMS_TO_TICKS(300));
         }
     }
   
@@ -769,6 +760,36 @@ void XiaozhiCardBoard::HandleBoardEvent(BoardEvent event)
     }
 }
 
+void XiaozhiCardBoard::PowerOnModem() 
+{
+    ESP_LOGI(TAG, "Power On Modem");
+
+    gpio_num_t pwr_pin = ML307R_PIN_PWR;
+    gpio_reset_pin(pwr_pin);
+    gpio_set_direction(pwr_pin, GPIO_MODE_OUTPUT);
+    gpio_set_level(pwr_pin, 0);
+    vTaskDelay(pdMS_TO_TICKS(100));
+    // 关机状态下，PWR 拉低 2s ~ 3.5s 开机 （pwr 逻辑反转）
+    gpio_set_level(pwr_pin, 1); 
+    vTaskDelay(pdMS_TO_TICKS(2500));
+    gpio_set_level(pwr_pin, 0);
+}
+
+void XiaozhiCardBoard::PowerOffModem() 
+{
+    ESP_LOGI(TAG, "Power Off Modem");
+
+    gpio_num_t pwr_pin = ML307R_PIN_PWR;
+    gpio_reset_pin(pwr_pin);
+    gpio_set_direction(pwr_pin, GPIO_MODE_OUTPUT);
+    gpio_set_level(pwr_pin, 0);
+    vTaskDelay(pdMS_TO_TICKS(100));
+    // 开机状态下，PWR 拉低 3.5 ~ 4.0s 关机 （pwr 逻辑反转）
+    gpio_set_level(pwr_pin, 1); 
+    vTaskDelay(pdMS_TO_TICKS(3750));
+    gpio_set_level(pwr_pin, 0);
+}
+
 void XiaozhiCardBoard::Enable4G(void)
 {
     ESP_LOGI(TAG, "Enable4G");
@@ -776,19 +797,8 @@ void XiaozhiCardBoard::Enable4G(void)
     struct TaskWrapper {
         static void run(void *param) {
             auto *self = static_cast<XiaozhiCardBoard*>(param);
-
-            gpio_num_t pwr_pin = ML307R_PIN_PWR;
-            gpio_reset_pin(pwr_pin);
-            gpio_set_direction(pwr_pin, GPIO_MODE_OUTPUT);
-            gpio_set_level(pwr_pin, 0);
-            vTaskDelay(pdMS_TO_TICKS(100));
-            // 关机状态下，PWR 拉低 2s ~ 3.5s 开机 （pwr 逻辑反转）
-            gpio_set_level(pwr_pin, 1); 
-            vTaskDelay(pdMS_TO_TICKS(2500));
-            gpio_set_level(pwr_pin, 0);
-
+            self->PowerOnModem();
             self->modem_powered_on_ = true;
-
             vTaskDelete(NULL);
         }
     };
@@ -803,30 +813,28 @@ void XiaozhiCardBoard::Disable4G(void)
     struct TaskWrapper {
         static void run(void *param) {
             auto* self = static_cast<XiaozhiCardBoard*>(param);
-            vTaskDelay(pdMS_TO_TICKS(2700)); // 等待模组启动完成
-            auto modem = AtModem::Detect(ML307R_PIN_TX, ML307R_PIN_RX, ML307R_PIN_DTR, 115200);
-            auto uart = modem->GetAtUart();
-            for (int i = 0; i < 5; i++) {
-                if (uart->SendCommand("AT+MPOF=0", 1000)) {
-                    std::string response = uart->GetResponse();
-                    if (response == "POWER OFF") {
-                        ESP_LOGI(TAG, "4G POWER OFF SUCCESS"); 
-                        break;
-                    }
-                }
-                if (i == 4) {
-                    gpio_num_t pwr_pin = ML307R_PIN_PWR;
-                    gpio_reset_pin(pwr_pin);
-                    gpio_set_direction(pwr_pin, GPIO_MODE_OUTPUT);
-                    gpio_set_level(pwr_pin, 0);
-                    vTaskDelay(pdMS_TO_TICKS(100));
-                    // 开机状态下，PWR 拉低 3.5 ~ 4.0s 关机 （pwr 逻辑反转）
-                    gpio_set_level(pwr_pin, 1); 
-                    vTaskDelay(pdMS_TO_TICKS(3750));
-                    gpio_set_level(pwr_pin, 0);
-                    break;
-                }
-            }
+            vTaskDelay(pdMS_TO_TICKS(3000)); // 等待模组启动完成
+            self->PowerOffModem();
+            // auto modem = AtModem::Detect(ML307R_PIN_TX, ML307R_PIN_RX, ML307R_PIN_DTR, 115200);
+            // if (!modem) { // Wi-Fi 切换到 4G 时 AtModem: Failed to send AT+CGMM command，这里做判断处理
+            //     ESP_LOGE(TAG, "Failed to detect modem");
+            //     self->PowerOffModem();
+            // } else {
+            //     auto uart = modem->GetAtUart();
+            //     for (int i = 0; i < 5; i++) {
+            //         if (uart->SendCommand("AT+MPOF=0", 1000)) {
+            //             std::string response = uart->GetResponse();
+            //             if (response == "POWER OFF") {
+            //                 ESP_LOGI(TAG, "4G POWER OFF SUCCESS"); 
+            //                 break;
+            //             }
+            //         }
+            //         if (i == 4) {
+            //             self->PowerOffModem();
+            //             break;
+            //         }
+            //     }
+            // }
             self->modem_powered_on_ = false;  
             vTaskDelete(NULL);
         }
@@ -927,9 +935,9 @@ bool XiaozhiCardBoard::GetBatteryLevel(int &level, bool &charging, bool &dischar
     charging = (charger_->GetChargeState() != 0);
     discharging = !charging;
     if (!power_save_timer_user_set_ && power_save_timer_ != nullptr) { // 用户未手动设置情况下 
-        SetPowerSaveMode(!charging); // 充电时关闭省电模式，未充电开启省电模式
         if (last_charging != charging) { // 状态变化时才更新显示 
             last_charging = charging;
+            SetPowerSaveMode(!charging); // 充电时关闭省电模式，未充电开启省电模式
             lvgl_port_lock(0);
             if (GetPowerSaveMode()) {
                 lv_label_set_text(display_->setup_label_auto_sleep_, "关闭自动休眠");
