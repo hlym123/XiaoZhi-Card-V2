@@ -137,6 +137,7 @@ void Application::CheckNewVersion(Ota& ota) {
 
             if (upgrade == 1) {  
                 SetDeviceState(kDeviceStateUpgrading);
+                vTaskDelay(pdMS_TO_TICKS(1000)); // 等待按键音播放完成 
                 
                 display->SetIcon(FONT_AWESOME_DOWNLOAD);
                 std::string message = std::string(Lang::Strings::NEW_VERSION) + ota.GetFirmwareVersion();
@@ -146,13 +147,13 @@ void Application::CheckNewVersion(Ota& ota) {
                 audio_service_.Stop();
                 vTaskDelay(pdMS_TO_TICKS(1000));
 
-            bool upgrade_success = ota.StartUpgrade([display](int progress, size_t speed) {
-                std::thread([display, progress, speed]() {
-                    char buffer[32];
-                    snprintf(buffer, sizeof(buffer), "%d%% %uKB/s", progress, speed / 1024);
-                    display->SetChatMessage("system", buffer);
-                }).detach();
-            });
+                bool upgrade_success = ota.StartUpgrade([display](int progress, size_t speed) {
+                    std::thread([display, progress, speed]() {
+                        char buffer[32];
+                        snprintf(buffer, sizeof(buffer), "%d%% %uKB/s", progress, speed / 1024);
+                        display->SetChatMessage("system", buffer);
+                    }).detach();
+                });
 
                 if (!upgrade_success) {
                     // Upgrade failed, restart audio service and continue running
@@ -424,14 +425,14 @@ void Application::Start() {
         }
     });
     protocol_->OnAudioChannelOpened([this, codec, &board]() {
-        board.SetPowerSaveMode(false);
+        // board.SetPowerSaveMode(false); // 关闭此逻辑 
         if (protocol_->server_sample_rate() != codec->output_sample_rate()) {
             ESP_LOGW(TAG, "Server sample rate %d does not match device output sample rate %d, resampling may cause distortion",
                 protocol_->server_sample_rate(), codec->output_sample_rate());
         }
     });
     protocol_->OnAudioChannelClosed([this, &board]() {
-        board.SetPowerSaveMode(true);
+        // board.SetPowerSaveMode(true); // 关闭此逻辑 
         Schedule([this]() {
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");

@@ -59,6 +59,49 @@ const char* BoardEventToString(BoardEvent e) {
     }
 }
 
+class MovingAverageFilter {
+public:
+    MovingAverageFilter(int size)
+        : size_(size), buffer_(new float[size]), index_(0), count_(0), sum_(0), first_init_(true) 
+    {
+        memset(buffer_, 0, size * sizeof(float));
+    }
+
+    ~MovingAverageFilter() {
+        delete[] buffer_;
+    }
+
+    float update(float value) {
+        if (first_init_) {
+            // 首次初始化直接填满 buffer
+            for (int i = 0; i < size_; i++) buffer_[i] = value;
+            sum_ = value * size_;
+            count_ = size_;
+            index_ = 0;
+            first_init_ = false;
+            return value;
+        }
+
+        // 移动平均更新
+        sum_ -= buffer_[index_];
+        buffer_[index_] = value;
+        sum_ += value;
+
+        index_ = (index_ + 1) % size_;
+        if (count_ < size_) count_++;
+
+        return sum_ / count_;
+    }
+
+private:
+    int size_;
+    float* buffer_;
+    int index_;
+    int count_;
+    float sum_;
+    bool first_init_;
+};
+
 class XiaozhiCardBoard : public DualNetworkBoard {
 private:
     i2c_master_bus_handle_t i2c_bus_;        // I2C 
@@ -347,6 +390,7 @@ void XiaozhiCardBoard::InitializeIndicator()
         .max_leds = 1,
     };
     led_strip_rmt_config_t rmt_config = {};
+    rmt_config.clk_src = RMT_CLK_SRC_DEFAULT, 
     rmt_config.resolution_hz = 10 * 1000 * 1000;
     rmt_config.flags.with_dma = false;
     ESP_ERROR_CHECK(led_strip_new_rmt_device(&strip_config, &rmt_config, &led_strip_));
@@ -909,22 +953,25 @@ bool XiaozhiCardBoard::GetBatteryLevel(int &level, bool &charging, bool &dischar
     static uint8_t countdown = 10;
     static char text_tip[64];
     static float bat_vol;
-    // static int bat_cur;
     static lv_obj_t *scr = nullptr;
     static bool last_charging = false;
+    static MovingAverageFilter bat_filter(60); // 60 点滑动平均
+    float raw_level;
     static int last_level = 0;
 
+    /* 读取电池电压 */
     bat_vol = guage_->getVolt(VOLT_MODE::VOLT) / 1000.0f;
-    // bat_cur = guage_->getCurr(CURR_MODE::CURR_INSTANT);
-    //ESP_LOGI(TAG, "Power voltage: %.2fv current: %dmA", bat_vol, bat_cur);
     if (bat_vol >= BAT_VOL_FULL) {
-        level = 100;
+        raw_level = 100;
     } else {
-        level = (bat_vol - BAT_VOL_EMPTY) / (BAT_VOL_FULL - BAT_VOL_EMPTY) * 100;
-        if (level < 0) {
-            level = 0;
+        raw_level = (bat_vol - BAT_VOL_EMPTY) / (BAT_VOL_FULL - BAT_VOL_EMPTY) * 100;
+        if (raw_level < 0) {
+            raw_level = 0;
         } 
     }
+
+    float filtered_level = bat_filter.update(raw_level);
+    level = static_cast<int>(filtered_level + 0.5f); // 平均值取整
     if (last_level != level) { // 状态变化时才更新显示 
         last_level = level;
         lvgl_port_lock(0);
