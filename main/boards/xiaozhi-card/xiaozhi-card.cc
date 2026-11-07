@@ -477,7 +477,14 @@ void XiaozhiCardBoard::StartUp()
             lvgl_port_lock(0);
             lv_label_set_text(display_->scr_tip_label_title_, "低电量充电中请等待");
             lv_label_set_text(display_->scr_tip_label_, "");
-            lv_screen_load(display_->scr_tip_);
+            if (lv_screen_active() != display_->scr_tip_) {
+                ClearDisplay(0x00);
+                lv_screen_load(display_->scr_tip_);
+                for (int i = 0; i < 3; i++) {
+                    lv_obj_invalidate(lv_screen_active());   
+                    lv_refr_now(NULL);
+                }
+            }
             lvgl_port_unlock();
         }
 
@@ -525,7 +532,14 @@ void XiaozhiCardBoard::StartUp()
                 lvgl_port_lock(0);
                 lv_label_set_text(display_->scr_tip_label_title_, text_tip);
                 lv_label_set_text(display_->scr_tip_label_, text_bat_info);
-                lv_screen_load(display_->scr_tip_);
+                if (lv_screen_active() != display_->scr_tip_) {
+                    ClearDisplay(0x00);
+                    lv_screen_load(display_->scr_tip_);
+                    for (int i = 0; i < 3; i++) {
+                        lv_obj_invalidate(lv_screen_active());   
+                        lv_refr_now(NULL);
+                    }
+                }
                 lvgl_port_unlock();
             } else {
                 break;
